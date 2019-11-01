@@ -35,6 +35,7 @@ from .utils import (
 )
 # 3rd party imports
 from redis import Redis
+from redis.connection import SERVER_CLOSED_CONNECTION_ERROR
 from redis.client import list_or_args, parse_info
 from redis._compat import iteritems, basestring, izip, nativestr, long
 from redis.exceptions import RedisError, ResponseError, TimeoutError, DataError, ConnectionError, BusyLoadingError
@@ -414,9 +415,16 @@ class RedisCluster(Redis):
                     r.send_command('READONLY')
                     self.parse_response(r, 'READONLY', **kwargs)
                     is_read_replica = False
-
-                r.send_command(*args)
-                return self.parse_response(r, command, **kwargs)
+                try:
+                    r.send_command(*args)
+                    return self.parse_response(r, command, **kwargs)
+                except ConnectionError as e:
+                    if SERVER_CLOSED_CONNECTION_ERROR in e.message:
+                        r.disconnect()
+                        r.send_command(*args)
+                        return self.parse_response(r, command, **kwargs)
+                    else:
+                        raise
             except (RedisClusterException, BusyLoadingError):
                 raise
             except (ConnectionError, TimeoutError):
